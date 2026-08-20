@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>商家中心 - 美食订餐系统</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="dashboard">
+        <header class="dashboard-header">
+            <h2>🏪 商家中心</h2>
+            <div class="header-actions">
+                <div class="user-info">
+                    欢迎，<span id="shopNameDisplay"></span>
+                    <label class="toggle" style="margin-left:12px;">
+                        <input type="checkbox" id="statusToggle">
+                        <span class="slider"></span>
+                    </label>
+                    <span id="statusLabel" style="font-size:0.85rem;">营业中</span>
+                </div>
+                <button class="btn btn-danger btn-small" id="logoutBtn">退出</button>
+            </div>
+        </header>
+        <div class="dashboard-body">
+            <nav class="dashboard-sidebar">
+                <a class="active" data-panel="dishes">🍜 菜品管理</a>
+                <a data-panel="orders">📋 订单管理</a>
+            </nav>
+            <main class="dashboard-main">
+                <!-- Dishes Panel -->
+                <div class="panel active" id="panel-dishes">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+                        <h3>本店菜品</h3>
+                        <button class="btn btn-primary btn-small" id="addDishBtn">+ 新增菜品</button>
+                    </div>
+                    <div id="dishTableContainer"></div>
+                </div>
+
+                <!-- Orders Panel -->
+                <div class="panel" id="panel-orders">
+                    <h3>本店订单</h3>
+                    <div id="orderTableContainer"></div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Dish Modal -->
+    <div id="dishModal" class="modal-overlay" style="display:none;">
+        <div class="modal">
+            <h3 id="dishModalTitle">新增菜品</h3>
+            <input type="hidden" id="editDishId">
+            <div class="form-group">
+                <label for="dishName">菜品名称</label>
+                <input type="text" id="dishName" required>
+            </div>
+            <div class="form-group">
+                <label for="dishPrice">价格 (¥)</label>
+                <input type="number" id="dishPrice" step="0.01" min="0" required>
+            </div>
+            <div class="form-group">
+                <label for="dishCategory">分类</label>
+                <input type="text" id="dishCategory" placeholder="如：川菜、粤菜">
+            </div>
+            <div class="form-group">
+                <label for="dishDesc">描述</label>
+                <textarea id="dishDesc" rows="2"></textarea>
+            </div>
+            <div id="dishModalError" class="error-msg hidden"></div>
+            <div class="modal-actions">
+                <button class="btn btn-outline btn-small" onclick="closeDishModal()">取消</button>
+                <button class="btn btn-primary btn-small" id="saveDishBtn">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="errorModal" class="modal-overlay" style="display:none;">
+        <div class="modal">
+            <p id="errorModalText"></p>
+            <div class="modal-actions">
+                <button class="btn btn-primary btn-small" onclick="closeErrorModal()">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/merchant_dashboard.js"></script>
+</body>
+</html>

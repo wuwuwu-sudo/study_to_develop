@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>顾客中心 - 美食订餐系统</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="dashboard">
+        <header class="dashboard-header">
+            <h2>🍽 美食订餐</h2>
+            <div class="header-actions">
+                <div class="user-info">
+                    欢迎，<span id="usernameDisplay"></span>
+                </div>
+                <button class="btn btn-danger btn-small" id="logoutBtn">退出</button>
+            </div>
+        </header>
+        <div class="dashboard-body">
+            <nav class="dashboard-sidebar">
+                <a class="active" data-panel="shops">🏪 选择商家</a>
+                <a data-panel="orders">📋 我的订单</a>
+            </nav>
+            <main class="dashboard-main">
+                <!-- Shops Panel -->
+                <div class="panel active" id="panel-shops">
+                    <h3>营业中商家</h3>
+                    <div class="shop-grid" id="shopList"></div>
+                    <div id="selectedShopArea" style="display:none;">
+                        <hr style="margin:1rem 0;">
+                        <h3 id="selectedShopName">菜单</h3>
+                        <div class="category-filters" id="categoryFilters"></div>
+                        <div class="dish-grid" id="dishList"></div>
+                        <div id="cartArea" style="display:none;">
+                            <hr style="margin:1rem 0;">
+                            <h3>购物车</h3>
+                            <div class="cart-panel">
+                                <div id="cartItems"></div>
+                                <div class="cart-total" id="cartTotal">合计: ¥0.00</div>
+                                <div class="form-group">
+                                    <label for="orderAddress">送餐地址</label>
+                                    <input type="text" id="orderAddress" placeholder="请输入送餐地址">
+                                </div>
+                                <div class="form-group">
+                                    <label for="orderNote">备注</label>
+                                    <input type="text" id="orderNote" placeholder="选填">
+                                </div>
+                                <div class="cart-actions">
+                                    <button class="btn btn-outline btn-small" id="clearCartBtn">清空</button>
+                                    <button class="btn btn-primary btn-small" id="submitOrderBtn">提交订单</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Orders Panel -->
+                <div class="panel" id="panel-orders">
+                    <h3>我的订单</h3>
+                    <div id="orderList"></div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <div id="errorModal" class="modal-overlay" style="display:none;">
+        <div class="modal">
+            <p id="errorModalText"></p>
+            <div class="modal-actions">
+                <button class="btn btn-primary btn-small" onclick="closeErrorModal()">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/customer_dashboard.js"></script>
+</body>
+</html>

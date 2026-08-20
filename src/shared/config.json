@@ -1,0 +1,43 @@
+# Food_Delivery Server 配置文件(key=value 格式)
+# 修改后重启 ./webserver 生效
+
+# ===== 服务器 =====
+# 事件循环线程池大小 = CPU 逻辑核数(本机 8)(0 = 不使用线程池，事件循环线程内同步处理)
+# 监听地址：默认 0.0.0.0(全接口)；接入 Nginx 时应设为 127.0.0.1(见 config/instance_*.json)
+server.bind_address=0.0.0.0
+server.thread_pool_size=8
+server.max_connections=1024
+server.read_timeout=30
+server.write_timeout=30
+
+# ===== 限流(每 IP 窗口内最多 max_requests 次，超限封禁 block_seconds 秒) =====
+server.rate_limit.max_requests=100
+server.rate_limit.window_seconds=60
+server.rate_limit.block_seconds=300
+
+# ===== 数据库 =====
+# 连接池大小应 >= 线程池大小，避免工作线程等待数据库连接
+# (main.cpp 通过 config.get_db_pool_size() 读取此值)
+db.path=food_delivery.db
+db.pool_size=16
+
+# ===== 多级缓存（L1 本地内存 → L2 Redis → L3 数据源）=====
+# 菜品查询走三级缓存：先查本地内存，再查 Redis，最后才查数据库
+cache.local.ttl=60
+cache.local.max_entries=10000
+# 设为 0 可关闭 Redis 层（只剩 L1 + L3），Redis 不可用时自动降级不报错
+cache.redis.enabled=1
+cache.redis.host=127.0.0.1
+cache.redis.port=6379
+cache.redis.ttl=300
+cache.redis.timeout_ms=300
+
+# ===== 日志（级别下调 + INFO 抽样；压测/生产可调低，避免日志写满磁盘）=====
+# server.log_level=debug/info/warn/error（设 warn 只留错误，每请求 INFO 日志归零）
+# server.log_sampling=抽样分母（1=全量；100=每 100 条 INFO 记 1 条；WARN/ERROR 永不抽样）
+server.log_level=info
+server.log_sampling=1
+
+# ===== 会话 =====
+session.ttl=3600
+session.cleanup_interval=300

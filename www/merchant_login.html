@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>商家登录 - 美食订餐系统</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="auth-page">
+        <div class="auth-card">
+            <h1>商家登录</h1>
+            <form id="loginForm" action="/api/merchant/login" method="POST">
+                <div class="form-group">
+                    <label for="username">用户名</label>
+                    <input type="text" id="username" name="username" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">密码</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                <div id="errorMsg" class="error-msg hidden"></div>
+                <button type="submit" class="btn btn-primary btn-full">登录</button>
+            </form>
+            <p class="auth-link">还没有商家账号？<a href="/merchant_register.html">立即注册</a></p>
+            <p class="auth-link"><a href="/login.html">顾客登录</a> · <a href="/">返回首页</a></p>
+        </div>
+    </div>
+        <script>
+    document.getElementById('loginForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        /* ---------- 1. 组装 JSON ---------- */
+        const fd = new FormData(this);
+        const data = {
+            username: fd.get('username'),
+            password: fd.get('password')
+        };
+
+        try {
+            /* ---------- 2. 发送 JSON ---------- */
+            const resp = await fetch(this.action, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json; charset=utf-8'
+                },
+                body: JSON.stringify(data),
+                redirect: 'manual'
+            });
+
+            /* ---------- 3. 处理 3xx 重定向 ---------- */
+            if (resp.status >= 300 && resp.status < 400) {
+                window.location.href = resp.headers.get('Location');
+                return;
+            }
+
+            /* ---------- 4. 登录成功 ---------- */
+            if (resp.status === 200) {
+                window.location.href = 'merchant_dashboard.html';
+                return;
+            }
+
+            /* ---------- 5. 登录失败 ---------- */
+            const result = await resp.json();
+            document.getElementById('errorMsg').textContent =
+                result.message || '登录失败';
+            document.getElementById('errorMsg').classList.remove('hidden');
+
+        } catch (err) {
+            document.getElementById('errorMsg').textContent = '网络错误';
+            document.getElementById('errorMsg').classList.remove('hidden');
+        }
+    });
+    </script>
+</body>
+</html>

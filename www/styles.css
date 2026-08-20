@@ -1,0 +1,371 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: #f5f5f5;
+    color: #333;
+    line-height: 1.6;
+}
+
+a { color: #e74c3c; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Hero / Landing */
+.hero {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+    color: #fff;
+    text-align: center;
+    padding: 2rem;
+}
+.hero-content { max-width: 480px; }
+.hero-content h1 { font-size: 2.5rem; margin-bottom: 0.5rem; }
+.hero-content p { font-size: 1.1rem; opacity: 0.9; margin-bottom: 2rem; }
+.hero-buttons { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-bottom: 1.5rem; }
+.hero-divider {
+    display: flex; align-items: center; gap: 1rem; margin: 1.5rem 0; color: rgba(255,255,255,0.7);
+}
+.hero-divider::before, .hero-divider::after { content: ""; flex: 1; height: 1px; background: rgba(255,255,255,0.3); }
+
+/* Buttons */
+/* ===== 完整的按钮样式 ===== */
+
+/* 基础按钮 */
+.btn {
+    display: inline-block;
+    padding: 0.6rem 1.2rem;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+    border: 2px solid transparent;
+    transition: all 0.2s;
+    text-align: center;
+    line-height: 1.5;
+    color: #fff;  /* 默认白色文字 */
+}
+
+/* 按钮尺寸 */
+.btn-small {
+    padding: 0.3rem 0.7rem;
+    font-size: 0.8rem;
+    border-radius: 4px;
+}
+
+/* ===== 按钮颜色变体 ===== */
+
+/* 主要按钮 - 红色 */
+.btn-primary {
+    background: #e74c3c;
+    color: #fff;
+    border-color: #e74c3c;
+}
+.btn-primary:hover {
+    background: #c0392b;
+    border-color: #c0392b;
+    text-decoration: none;
+}
+
+/* 次要按钮 - 灰色边框 */
+.btn-secondary {
+    background: #6c757d;
+    color: #fff;
+    border-color: #6c757d;
+}
+.btn-secondary:hover {
+    background: #5a6268;
+    border-color: #5a6268;
+    text-decoration: none;
+}
+
+/* 轮廓按钮 - 蓝色边框透明背景 */
+.btn-outline {
+    background: transparent;
+    color: #3498db;
+    border-color: #3498db;
+}
+.btn-outline:hover {
+    background: #3498db;
+    color: #fff;
+    text-decoration: none;
+}
+
+/* 成功按钮 - 绿色 */
+.btn-success {
+    background: #27ae60;
+    color: #fff;
+    border-color: #27ae60;
+}
+.btn-success:hover {
+    background: #219a52;
+    border-color: #219a52;
+    text-decoration: none;
+}
+
+/* 危险按钮 - 红色 */
+.btn-danger {
+    background: #dc3545;
+    color: #fff;
+    border-color: #dc3545;
+}
+.btn-danger:hover {
+    background: #c82333;
+    border-color: #bd2130;
+    text-decoration: none;
+}
+
+/* 警告按钮 - 黄色（可选） */
+.btn-warning {
+    background: #ffc107;
+    color: #212529;
+    border-color: #ffc107;
+}
+.btn-warning:hover {
+    background: #e0a800;
+    border-color: #d39e00;
+    text-decoration: none;
+}
+
+/* 信息按钮 - 浅蓝色（可选） */
+.btn-info {
+    background: #17a2b8;
+    color: #fff;
+    border-color: #17a2b8;
+}
+.btn-info:hover {
+    background: #138496;
+    border-color: #117a8b;
+    text-decoration: none;
+}
+
+/* 按钮操作区域 */
+.actions {
+    display: flex;
+    gap: 0.3rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+/* 表格中的按钮 - 保证可见 */
+.dish-table .actions .btn,
+.order-table .actions .btn {
+    min-width: 48px;
+    padding: 0.25rem 0.6rem;
+    font-size: 0.78rem;
+    border-radius: 3px;
+    border: 1px solid transparent;
+    color: #fff;
+}
+
+/* 表格内具体按钮颜色覆盖 */
+.dish-table .actions .btn-outline {
+    background: #3498db;
+    color: #fff;
+    border-color: #3498db;
+}
+.dish-table .actions .btn-outline:hover {
+    background: #2176bd;
+    border-color: #2176bd;
+}
+
+.dish-table .actions .btn-secondary {
+    background: #6c757d;
+    color: #fff;
+    border-color: #6c757d;
+}
+.dish-table .actions .btn-secondary:hover {
+    background: #5a6268;
+    border-color: #5a6268;
+}
+
+.dish-table .actions .btn-success {
+    background: #28a745;
+    color: #fff;
+    border-color: #28a745;
+}
+.dish-table .actions .btn-success:hover {
+    background: #218838;
+    border-color: #1e7e34;
+}
+
+.dish-table .actions .btn-danger {
+    background: #dc3545;
+    color: #fff;
+    border-color: #dc3545;
+}
+.dish-table .actions .btn-danger:hover {
+    background: #c82333;
+    border-color: #bd2130;
+}
+
+/* Auth Pages */
+.auth-page {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+    padding: 2rem;
+}
+.auth-card {
+    background: #fff; border-radius: 8px; padding: 2.5rem;
+    width: 100%; max-width: 400px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+.auth-card h1 { text-align: center; margin-bottom: 1.5rem; color: #333; font-size: 1.5rem; }
+.auth-link { text-align: center; margin-top: 1rem; font-size: 0.9rem; color: #666; }
+
+/* Forms */
+.form-group { margin-bottom: 1rem; }
+.form-group label { display: block; margin-bottom: 0.3rem; font-weight: 500; font-size: 0.9rem; color: #555; }
+.form-group input, .form-group select, .form-group textarea {
+    width: 100%; padding: 0.6rem 0.75rem; border: 1px solid #ddd; border-radius: 4px;
+    font-size: 0.95rem; transition: border-color 0.2s;
+}
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+    outline: none; border-color: #e74c3c;
+}
+
+.error-msg { color: #e74c3c; font-size: 0.85rem; margin-bottom: 0.5rem; padding: 0.5rem; background: #fef0ef; border-radius: 4px; }
+.hidden { display: none; }
+
+/* Dashboard Layout */
+.dashboard {
+    display: flex; flex-direction: column; min-height: 100vh;
+}
+.dashboard-header {
+    background: #fff; border-bottom: 1px solid #eee;
+    padding: 0 2rem; display: flex; align-items: center;
+    justify-content: space-between; height: 60px; position: sticky; top: 0; z-index: 100;
+}
+.dashboard-header h2 { font-size: 1.2rem; color: #e74c3c; }
+.dashboard-header .user-info { display: flex; align-items: center; gap: 1rem; font-size: 0.9rem; color: #666; }
+.dashboard-header .user-info span { font-weight: 500; color: #333; }
+
+.dashboard-body {
+    display: flex; flex: 1;
+}
+.dashboard-sidebar {
+    width: 220px; background: #fff; border-right: 1px solid #eee;
+    padding: 1.5rem 0; flex-shrink: 0;
+}
+.dashboard-sidebar a {
+    display: block; padding: 0.75rem 1.5rem; color: #555;
+    font-size: 0.9rem; transition: all 0.15s; cursor: pointer;
+}
+.dashboard-sidebar a:hover, .dashboard-sidebar a.active {
+    background: #fef0ef; color: #e74c3c; text-decoration: none;
+}
+.dashboard-main {
+    flex: 1; padding: 2rem; overflow-y: auto;
+}
+
+/* Content panels */
+.panel { display: none; }
+.panel.active { display: block; }
+.panel h3 { font-size: 1.3rem; margin-bottom: 1rem; color: #333; }
+
+/* Shop list */
+.shop-grid, .dish-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1rem; margin-bottom: 1.5rem;
+}
+.shop-card {
+    background: #fff; border-radius: 8px; padding: 1.25rem;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08); cursor: pointer;
+    transition: box-shadow 0.2s; border: 2px solid transparent;
+}
+.shop-card:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.12); }
+.shop-card.selected { border-color: #e74c3c; }
+.shop-card h4 { margin-bottom: 0.3rem; }
+.shop-card p { font-size: 0.85rem; color: #888; }
+
+/* Dish card */
+.dish-card {
+    background: #fff; border-radius: 8px; padding: 1rem;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08); display: flex;
+    flex-direction: column; gap: 0.4rem;
+}
+.dish-card h4 { font-size: 1rem; }
+.dish-card .price { color: #e74c3c; font-weight: 600; font-size: 1.1rem; }
+.dish-card .category { font-size: 0.8rem; color: #888; }
+.dish-card .desc { font-size: 0.85rem; color: #666; }
+.dish-card .dish-actions { margin-top: auto; padding-top: 0.5rem; display: flex; gap: 0.5rem; align-items: center; }
+.dish-card .qty-input { width: 60px; padding: 0.3rem; text-align: center; border: 1px solid #ddd; border-radius: 4px; }
+
+/* Category filter */
+.category-filters {
+    display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;
+}
+.category-filters button {
+    padding: 0.4rem 1rem; border: 1px solid #ddd; border-radius: 20px;
+    background: #fff; cursor: pointer; font-size: 0.85rem; transition: all 0.15s;
+}
+.category-filters button:hover { border-color: #e74c3c; color: #e74c3c; }
+.category-filters button.active { background: #e74c3c; color: #fff; border-color: #e74c3c; }
+
+/* Cart */
+.cart-panel {
+    background: #fff; border-radius: 8px; padding: 1.25rem;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+.cart-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.5rem 0; border-bottom: 1px solid #f0f0f0;
+}
+.cart-item:last-child { border-bottom: none; }
+.cart-total { font-size: 1.1rem; font-weight: 600; margin: 0.5rem 0; text-align: right; }
+.cart-actions { display: flex; gap: 0.5rem; justify-content: flex-end; flex-wrap: wrap; }
+
+/* Orders table */
+.order-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+.order-table th, .order-table td { padding: 0.75rem 1rem; text-align: left; font-size: 0.9rem; }
+.order-table th { background: #fafafa; font-weight: 600; color: #555; border-bottom: 1px solid #eee; }
+.order-table td { border-bottom: 1px solid #f5f5f5; }
+.order-table tr:hover td { background: #fafafa; }
+
+.status-badge { padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; font-weight: 500; }
+.status-pending { background: #fff3cd; color: #856404; }
+.status-accepted { background: #cce5ff; color: #004085; }
+.status-completed { background: #d4edda; color: #155724; }
+
+/* Modal */
+.modal-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.4); display: flex; align-items: center;
+    justify-content: center; z-index: 1000;
+}
+.modal { background: #fff; border-radius: 8px; padding: 2rem; width: 90%; max-width: 500px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); }
+.modal h3 { margin-bottom: 1rem; }
+.modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
+
+/* Merch dish table */
+.dish-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+.dish-table th, .dish-table td { padding: 0.6rem 0.8rem; text-align: left; font-size: 0.9rem; }
+.dish-table th { background: #fafafa; font-weight: 600; color: #555; border-bottom: 1px solid #eee; }
+.dish-table td { border-bottom: 1px solid #f5f5f5; }
+.dish-table .actions { display: flex; gap: 0.3rem; }
+
+/* Toggle switch */
+.toggle { position: relative; display: inline-block; width: 44px; height: 24px; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle .slider {
+    position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+    background: #ccc; transition: 0.3s; border-radius: 24px;
+}
+.toggle .slider::before {
+    content: ""; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px;
+    background: #fff; transition: 0.3s; border-radius: 50%;
+}
+.toggle input:checked + .slider { background: #27ae60; }
+.toggle input:checked + .slider::before { transform: translateX(20px); }
+
+.header-actions { display: flex; align-items: center; gap: 1rem; }
+
+/* Responsive */
+@media (max-width: 768px) {
+    .dashboard-sidebar { width: 160px; }
+    .dashboard-main { padding: 1rem; }
+    .shop-grid, .dish-grid { grid-template-columns: 1fr; }
+    .hero-content h1 { font-size: 1.8rem; }
+}

@@ -150,5 +150,9 @@ int ConnectionPool::inUse() const {
     return in_use_;
 }
 
+std::unique_lock<std::mutex> ConnectionPool::lock_for_write() {
+    return std::unique_lock<std::mutex>(write_mutex_);
+}
+
 } // namespace database
 } // namespace infrastructure

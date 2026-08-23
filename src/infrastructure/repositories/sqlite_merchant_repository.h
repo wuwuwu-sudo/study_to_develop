@@ -15,6 +15,7 @@ public:
     std::optional<Merchant> find_by_id(int merchant_id) override;
     std::optional<Merchant> find_by_username(const std::string& username) override;
     int save(const Merchant& merchant) override;
+    bool update_open_status(int merchant_id, bool open) override;
     std::vector<Merchant> find_open_merchants() override;
 
 private:

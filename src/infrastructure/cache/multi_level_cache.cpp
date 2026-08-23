@@ -8,9 +8,11 @@
 namespace infrastructure::cache {
 
 MultiLevelCache::MultiLevelCache(std::shared_ptr<LocalCache> local,
-                                 std::shared_ptr<RedisClient> redis)
+                                 std::shared_ptr<RedisClient> redis,
+                                 RedisAsyncSubmit redis_async_submit)
     : local_(std::move(local))
-    , redis_(std::move(redis)) {}
+    , redis_(std::move(redis))
+    , redis_async_submit_(std::move(redis_async_submit)) {}
 
 std::optional<std::string> MultiLevelCache::get(const std::string& key,
                                                 const Loader& loader,
@@ -52,14 +54,29 @@ std::optional<std::string> MultiLevelCache::get(const std::string& key,
 void MultiLevelCache::set(const std::string& key, const std::string& value,
                           int local_ttl_seconds, int redis_ttl_seconds) {
     local_->set(key, value, local_ttl_seconds);
-    if (redis_) {
+    if (!redis_) {
+        return;
+    }
+    // 阶段4：配置了异步提交器时，L2 写（回填）投专用 Redis 线程，业务线程不阻塞
+    if (redis_async_submit_) {
+        auto r = redis_;
+        redis_async_submit_([r, key, value, redis_ttl_seconds]() {
+            r->set(key, value, redis_ttl_seconds);
+        });
+    } else {
         redis_->set(key, value, redis_ttl_seconds);
     }
 }
 
 bool MultiLevelCache::del(const std::string& key) {
     bool removed = local_->del(key);
-    if (redis_) {
+    if (!redis_) {
+        return removed;
+    }
+    if (redis_async_submit_) {
+        auto r = redis_;
+        redis_async_submit_([r, key]() { r->del(key); });
+    } else {
         removed = redis_->del(key) || removed;
     }
     return removed;
@@ -67,10 +84,15 @@ bool MultiLevelCache::del(const std::string& key) {
 
 int MultiLevelCache::clear_prefix(const std::string& prefix) {
     local_->clear_prefix(prefix);
-    if (redis_) {
-        return redis_->clear_prefix(prefix);
+    if (!redis_) {
+        return 0;
     }
-    return 0;
+    if (redis_async_submit_) {
+        auto r = redis_;
+        redis_async_submit_([r, prefix]() { r->clear_prefix(prefix); });
+        return 0;  // L2 已投专用线程异步清；调用方不依赖该返回值
+    }
+    return redis_->clear_prefix(prefix);
 }
 
 bool MultiLevelCache::redis_available() const {

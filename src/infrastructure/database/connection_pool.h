@@ -36,6 +36,11 @@ public:
     // 当前已借出的连接数
     int inUse() const;
 
+    // 阶段1「单写串行化门」：返回写锁，持有期间本进程内写路径互斥排队，
+    // 减少写-写并发争用与 SQLITE_BUSY 重试（读路径不受影响，保持并发）。
+    // 写锁独立于连接池：等待写锁的调用不占用连接，不会死锁。
+    std::unique_lock<std::mutex> lock_for_write();
+
 private:
     sqlite3* createConnection();
     void resetConnection(sqlite3* conn);
@@ -50,6 +55,7 @@ private:
     std::condition_variable cv_;
     std::queue<sqlite3*> pool_;
     int in_use_ = 0;
+    std::mutex write_mutex_;  // 阶段1 单写串行化门
 };
 
 } // namespace database

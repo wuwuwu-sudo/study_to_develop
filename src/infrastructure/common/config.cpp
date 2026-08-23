@@ -51,6 +51,10 @@ void Config::use_defaults() {
     if (values_.find("db.pool_size") == values_.end()) {
         values_["db.pool_size"] = std::to_string(constants::DEFAULT_DB_POOL_SIZE);
     }
+    if (values_.find("db.worker_threads") == values_.end()) {
+        values_["db.worker_threads"] =
+            std::to_string(constants::DEFAULT_DB_WORKER_THREADS);
+    }
     if (values_.find("session.ttl") == values_.end()) {
         values_["session.ttl"] = std::to_string(constants::DEFAULT_SESSION_TTL_SECONDS);
     }
@@ -58,9 +62,13 @@ void Config::use_defaults() {
         values_["session.cleanup_interval"] =
             std::to_string(constants::DEFAULT_SESSION_CLEANUP_INTERVAL_SECONDS);
     }
-    if (values_.find("server.thread_pool_size") == values_.end()) {
-        values_["server.thread_pool_size"] =
-            std::to_string(constants::DEFAULT_THREAD_POOL_SIZE);
+    if (values_.find("server.task_queue") == values_.end()) {
+        values_["server.task_queue"] =
+            std::to_string(constants::DEFAULT_TASK_QUEUE_ENABLED);
+    }
+    if (values_.find("server.task_queue_consumers") == values_.end()) {
+        values_["server.task_queue_consumers"] =
+            std::to_string(constants::DEFAULT_TASK_QUEUE_CONSUMERS);
     }
     if (values_.find("cache.local.ttl") == values_.end()) {
         values_["cache.local.ttl"] = std::to_string(constants::DEFAULT_CACHE_TTL_SECONDS);
@@ -83,6 +91,10 @@ void Config::use_defaults() {
     }
     if (values_.find("cache.redis.timeout_ms") == values_.end()) {
         values_["cache.redis.timeout_ms"] = "300";
+    }
+    if (values_.find("cache.redis.worker_threads") == values_.end()) {
+        values_["cache.redis.worker_threads"] =
+            std::to_string(constants::DEFAULT_REDIS_WORKER_THREADS);
     }
 }
 

@@ -7,6 +7,9 @@ namespace infrastructure::common {
 AppException::AppException(const std::string& message)
     : std::runtime_error(message) {}
 
+OptimisticLockException::OptimisticLockException(const std::string& message)
+    : AppException(message) {}
+
 InfrastructureException::InfrastructureException(const std::string& message, int code)
     : std::runtime_error(message)
     , code_(code) {}

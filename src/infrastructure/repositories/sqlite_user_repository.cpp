@@ -81,7 +81,7 @@ std::optional<User> SqliteUserRepository::find_by_username(const std::string& us
 }
 
 int SqliteUserRepository::save(const User& user) {
-    auto conn = db_.get_connection();
+    auto conn = db_.get_write_connection();  // 阶段1 单写串行化门
     if (!conn) {
         Logger::instance().error("Failed to get database connection");
         return -1;

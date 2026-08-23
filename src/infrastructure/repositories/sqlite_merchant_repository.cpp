@@ -97,7 +97,7 @@ std::optional<Merchant> SqliteMerchantRepository::find_by_username(const std::st
 }
 
 int SqliteMerchantRepository::save(const Merchant& merchant) {
-    auto conn = db_.get_connection();
+    auto conn = db_.get_write_connection();  // 阶段1 单写串行化门
     if (!conn) {
         Logger::instance().error("Failed to get database connection");
         return -1;
@@ -141,6 +141,41 @@ int SqliteMerchantRepository::save(const Merchant& merchant) {
     }
 
     return merchant_id;
+}
+
+bool SqliteMerchantRepository::update_open_status(int merchant_id, bool open) {
+    auto conn = db_.get_write_connection();  // 阶段1 单写串行化门
+    if (!conn) {
+        Logger::instance().error("Failed to get database connection");
+        return false;
+    }
+
+    sqlite3* handle = conn->handle();
+    // 幂等条件更新：仅当当前 is_open != 目标值才更新；已处于目标状态（0 行）也视为成功。
+    // 避免整行 INSERT OR REPLACE 覆盖并发修改的其他字段（丢失更新）。
+    const char* sql =
+        "UPDATE merchants SET is_open = ? WHERE id = ? AND is_open != ?;";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        Logger::instance().error("Failed to prepare statement: " + std::string(sqlite3_errmsg(handle)));
+        return false;
+    }
+
+    sqlite3_bind_int(stmt, 1, open ? 1 : 0);
+    sqlite3_bind_int(stmt, 2, merchant_id);
+    sqlite3_bind_int(stmt, 3, open ? 1 : 0);
+
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    if (rc != SQLITE_DONE) {
+        Logger::instance().error("Failed to update merchant open status: " +
+                                 std::string(sqlite3_errmsg(handle)));
+        return false;
+    }
+    return true;  // 0 行 = 已处于目标状态（幂等成功）
 }
 
 std::vector<Merchant> SqliteMerchantRepository::find_open_merchants() {

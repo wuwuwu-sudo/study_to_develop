@@ -179,6 +179,7 @@ void init_database() {
         "description TEXT,"
         "available INTEGER DEFAULT 1,"
         "deleted INTEGER DEFAULT 0,"
+        "version INTEGER DEFAULT 0,"
         "FOREIGN KEY (merchant_id) REFERENCES merchants(id)"
         ");";
 
@@ -257,6 +258,33 @@ void init_database() {
     }
 
     // ============================================================
+    // 兼容旧库：若 dishes 表缺少 version 列则补充（乐观锁迁移）
+    // ============================================================
+    {
+        bool has_version = false;
+        const char* pragma_sql = "PRAGMA table_info(dishes);";
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(handle, pragma_sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char* col = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+                if (col && std::string(col) == "version") {
+                    has_version = true;
+                }
+            }
+            sqlite3_finalize(stmt);
+        }
+        if (!has_version) {
+            const char* alter_sql =
+                "ALTER TABLE dishes ADD COLUMN version INTEGER DEFAULT 0;";
+            if (sqlite3_exec(handle, alter_sql, nullptr, nullptr, nullptr) != SQLITE_OK) {
+                Logger::instance().error("Failed to add version column to dishes");
+                return;
+            }
+            Logger::instance().info("Migrated dishes: added version column");
+        }
+    }
+
+    // ============================================================
     // 校验 4：表结构与期望是否一致
     // ============================================================
     struct TableSchema {
@@ -267,7 +295,7 @@ void init_database() {
     std::vector<TableSchema> schemas = {
         {"users", {"id", "username", "password_hash", "role", "active", "created_at"}},
         {"merchants", {"id", "username", "password_hash", "shop_name", "address", "is_open"}},
-        {"dishes", {"id", "merchant_id", "name", "price", "category", "description", "available", "deleted"}},
+        {"dishes", {"id", "merchant_id", "name", "price", "category", "description", "available", "deleted", "version"}},
         {"orders", {"id", "user_id", "merchant_id", "status", "total", "address", "remark", "created_at"}},
         {"order_items", {"id", "order_id", "dish_id", "dish_name", "price", "quantity"}},
     };

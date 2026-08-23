@@ -88,8 +88,24 @@ void HttpServer::set_write_timeout(int seconds) {
     write_timeout_ = seconds;
 }
 
-void HttpServer::set_worker_count(int worker_count) {
-    worker_count_ = worker_count > 0 ? worker_count : 0;
+void HttpServer::set_task_queue_enabled(bool enabled) {
+    task_queue_enabled_ = enabled;
+}
+
+void HttpServer::set_task_queue_consumers(int consumers) {
+    task_queue_consumers_ = consumers > 0 ? consumers : 1;
+}
+
+void HttpServer::set_db_submitter(DbSubmitFn fn) {
+    db_submit_ = std::move(fn);
+}
+
+void HttpServer::set_read_path_async(bool enabled) {
+    read_path_async_ = enabled;
+}
+
+void HttpServer::set_slow_path_switch(std::shared_ptr<shared::SlowPathSwitch> sw) {
+    slow_switch_ = std::move(sw);
 }
 
 void HttpServer::use(std::unique_ptr<presentation::middleware::Middleware> middleware) {
@@ -174,10 +190,12 @@ void HttpServer::event_loop() {
     constexpr int MAX_EVENTS = 1024;
     struct epoll_event events[MAX_EVENTS];
 
-    // 进入 epoll 循环前创建线程池，用于并行处理客户端事件
-    if (worker_count_ > 0) {
-        thread_pool_ = std::make_unique<shared::ThreadPool>(worker_count_);
-        LOG_INFO("Thread pool created: " + std::to_string(worker_count_) + " workers");
+    // 进入 epoll 循环前创建任务队列（消费线程数可配，默认 1），
+    // 事件循环只负责 accept/读事件，业务处理提交到任务队列消费。
+    if (task_queue_enabled_) {
+        task_queue_ = std::make_unique<shared::TaskQueue>(task_queue_consumers_);
+        LOG_INFO("Task queue created: " + std::to_string(task_queue_consumers_) +
+                 " consumer thread(s)");
     }
 
     while (running_) {
@@ -207,15 +225,31 @@ void HttpServer::event_loop() {
                 continue;
             }
 
-            // 正常可读：捕获 shared_ptr 提交线程池，避免 fd 复用竞态
-            auto conn = get_conn(fd);
-            if (!conn) {
-                continue;
+            // 阶段3：可写事件——续发连接挂起的 out_buf（慢客户端场景），
+            // 发完注销 EPOLLOUT 回 READY 并提交 process_client 继续处理。
+            if (events[i].events & EPOLLOUT) {
+                auto conn = get_conn(fd);
+                if (conn) {
+                    if (task_queue_) {
+                        task_queue_->enqueue([this, conn] { flush_out(conn); });
+                    } else {
+                        flush_out(conn);
+                    }
+                }
             }
-            if (thread_pool_) {
-                thread_pool_->enqueue([this, conn] { process_client(conn); });
-            } else {
-                process_client(conn);
+
+            // 正常可读：捕获 shared_ptr 提交任务队列，避免 fd 复用竞态。
+            // （若与 EPOLLOUT 同时就绪会多调度一次 process_client；sending 时其内部自行返回，无害）
+            if (events[i].events & EPOLLIN) {
+                auto conn = get_conn(fd);
+                if (!conn) {
+                    continue;
+                }
+                if (task_queue_) {
+                    task_queue_->enqueue([this, conn] { process_client(conn); });
+                } else {
+                    process_client(conn);
+                }
             }
         }
 
@@ -223,13 +257,13 @@ void HttpServer::event_loop() {
         sweep_idle_connections();
     }
 
-    // 退出循环后停止线程池并等待任务全部完成，
+    // 退出循环后停止任务队列并等待任务全部完成，
     // 避免仍执行中的任务引用已销毁的服务器对象
-    if (thread_pool_) {
-        thread_pool_->shutdown();
-        thread_pool_->wait_all();
-        thread_pool_.reset();
-        LOG_INFO("Thread pool shut down");
+    if (task_queue_) {
+        task_queue_->shutdown();
+        task_queue_->wait_all();
+        task_queue_.reset();
+        LOG_INFO("Task queue shut down");
     }
     LOG_INFO("Delayed shrink events: " + std::to_string(shrink_count_.load()));
 }
@@ -328,6 +362,40 @@ void HttpServer::process_client(std::shared_ptr<ClientConn> conn) {
     if (conn->closed || conn->fd < 0) {
         return;
     }
+    // 阶段3：连接处于 SENDING（out_buf 未发完）。保持响应顺序，本次不处理；
+    // 由 flush_out 发完后提交 process_client 继续（届时会 recv 期间到达的新数据）。
+    if (conn->sending) {
+        return;
+    }
+
+    // ---- 阶段2 写请求异步挂起恢复 ----
+    // DB 工作线程已完成写处理：发送缓存好的响应并保持连接。
+    if (conn->db_pending) {
+        if (conn->db_response.empty()) {
+            // 响应尚未就绪（事件循环在写完成前又调度到本连接）：忽略本次调度，
+            // 由 DB 完成后的 resume 任务负责发送。
+            return;
+        }
+        conn->db_pending = false;
+        std::string resp;
+        resp.swap(conn->db_response);
+        // 阶段3：非阻塞发送（写满则挂起 out_buf + EPOLLOUT，释放消费者线程）
+        if (!try_send(conn, std::move(resp), false)) {
+            if (conn->sending) {
+                return;  // 已挂起：EPOLLOUT 就绪后由 flush_out 续发
+            }
+            conn->buffer.clear();
+            lock.unlock();
+            close_conn(conn);
+            return;
+        }
+        conn->last_active = std::chrono::steady_clock::now();
+        if (conn->buffer.empty()) {
+            return;  // 无剩余缓冲，保持连接等待下一请求
+        }
+        // 有剩余缓冲（管道后续请求）：落入下方常规解析处理
+    }
+
     conn->last_active = std::chrono::steady_clock::now();
 
     // 1. 批量读：非阻塞读到 EAGAIN（一次读入本批所有可用数据）；对端关闭/异常 fatal。
@@ -420,6 +488,84 @@ void HttpServer::process_client(std::shared_ptr<ClientConn> conn) {
         response.headers.clear();
         response.body.clear();
 
+        // ---- 阶段2 写请求异步化 / 阶段5 读路径异步化（整链投递，同步链之前拦截）----
+        // 拦截条件：本批尚无已生成响应（send_buf 为空，请求在批首）、配置了 DB
+        // 工作线程池；非 GET 请求始终异步（阶段2 写异步化）；GET 读请求仅在
+        // server.read_path_async 开启时异步（阶段5 全链路事件驱动）：
+        //   - 连接挂起（db_pending=true），立即释放 conn->mutex 返回，不阻塞事件循环；
+        //   - worker 线程在请求副本上执行 中间件+路由（含 DB 读写 + 缓存失效/回填），
+        //     产出自包含响应字节；完成后写回 conn->db_response 并把 conn 投回
+        //     任务队列续跑（函数顶部恢复块发送响应）。
+        //   读路径默认缓存命中率高保持同步（L1 吸收），避免每请求线程切换；
+        //   开启读异步（read_path_async 强制 或 slow_path_switch 自适应检出慢路径）后
+        //   L1 miss（L2/L3 慢或故障）不再阻塞消费者线程。
+        if (send_buf.empty() && db_submit_ &&
+            (request.method != HttpMethod::GET || read_path_async_ ||
+             (slow_switch_ && slow_switch_->async()))) {
+            // 捕获请求副本（thread_local 缓冲不跨线程）
+            HttpRequest req_copy = request;
+            conn->db_pending = true;
+            std::shared_ptr<ClientConn> conn_sp = conn;  // 延长生命周期至完成
+            lock.unlock();
+            db_submit_(
+                [this, req_copy = std::move(req_copy)]() -> std::string {
+                    // worker 线程：完整执行中间件+路由，返回序列化响应字节
+                    // static thread_local（静态存储期）可直接访问，无需捕获
+                    static thread_local HttpResponse resp_async;
+                    static thread_local std::string out_async;
+                    // 阶段5 增强：异步模式下由 worker 上报读耗时给慢路径开关
+                    std::chrono::steady_clock::time_point t0;
+                    if (req_copy.method == HttpMethod::GET && slow_switch_) {
+                        t0 = std::chrono::steady_clock::now();
+                    }
+                    resp_async.status_code = 200;
+                    resp_async.headers.clear();
+                    resp_async.body.clear();
+                    out_async.clear();
+                    pipeline_.execute(req_copy, resp_async,
+                                      [this, &req_copy]() {
+                                          router_.dispatch(req_copy,
+                                                           resp_async);
+                                      });
+                    bool keep_alive = request_keep_alive(req_copy);
+                    resp_async.set_header("Connection",
+                                          keep_alive ? "keep-alive" : "close");
+                    resp_async.serialize_header_into(out_async);
+                    out_async.append(resp_async.body);
+                    if (req_copy.method == HttpMethod::GET && slow_switch_) {
+                        auto us = std::chrono::duration_cast<
+                            std::chrono::microseconds>(
+                                std::chrono::steady_clock::now() - t0)
+                            .count();
+                        slow_switch_->observe(static_cast<int>(us));
+                    }
+                    return out_async;
+                },
+                [this, conn_sp = std::move(conn_sp)](std::string resp) mutable {
+                    // 完成回调（worker 线程）：写回响应并投回任务队列续跑
+                    {
+                        std::lock_guard<std::mutex> lk(conn_sp->mutex);
+                        conn_sp->db_response = std::move(resp);
+                    }
+                    if (task_queue_) {
+                        task_queue_->enqueue([this, conn_sp]() {
+                            process_client(conn_sp);
+                        });
+                    } else {
+                        // 无任务队列时退化为直接续跑（worker 线程内处理）
+                        process_client(conn_sp);
+                    }
+                });
+            return;  // 挂起连接，等待 DB 完成后的 resume
+        }
+
+        // 阶段5 增强：同步快路径下由消费者线程上报读耗时给慢路径开关
+        //（仅 GET 且启用了自适应开关时测量；稳态 L1 命中耗时远低于阈值）
+        std::chrono::steady_clock::time_point read_t0;
+        const bool measure_read = request.method == HttpMethod::GET && slow_switch_;
+        if (measure_read) {
+            read_t0 = std::chrono::steady_clock::now();
+        }
         // 执行中间件链（日志/限流/认证）+ 路由分发
         pipeline_.execute(request, response, [this, &request, &response]() {
             router_.dispatch(request, response);
@@ -435,6 +581,12 @@ void HttpServer::process_client(std::shared_ptr<ClientConn> conn) {
         send_buf.append(output);
         send_buf.append(response.body);
         conn->last_active = std::chrono::steady_clock::now();
+        if (measure_read) {
+            auto us = std::chrono::duration_cast<std::chrono::microseconds>(
+                          std::chrono::steady_clock::now() - read_t0)
+                          .count();
+            slow_switch_->observe(static_cast<int>(us));
+        }
 
         // ---- 延迟缩容：复用缓冲持续小用则释放多余容量（防占住峰值内存）----
         if (shrink_output.shrink_if_needed(output)) ++shrink_count_;
@@ -451,12 +603,14 @@ void HttpServer::process_client(std::shared_ptr<ClientConn> conn) {
         }
     }
 
-    // 3. 批量发送：本批所有响应一次 writev 发出（发送超时兜底在 send_allv 内）
+    // 3. 批量发送：本批所有响应一次发出。
+    //    阶段3：非阻塞发送，写满则把剩余挂到 conn->out_buf 并注册 EPOLLOUT，
+    //    立即返回释放消费者线程（慢客户端不再阻塞同线程其他连接）。
     if (!send_buf.empty()) {
-        struct iovec iov[1];
-        iov[0].iov_base = send_buf.data();
-        iov[0].iov_len = send_buf.size();
-        if (!send_allv(conn->fd, iov, 1, write_timeout_ * 1000)) {
+        if (!try_send(conn, std::move(send_buf), need_close)) {
+            if (conn->sending) {
+                return;  // 已挂起：EPOLLOUT 就绪后 flush_out 续发，发完提交 process_client
+            }
             conn->buffer.clear();
             lock.unlock();
             close_conn(conn);
@@ -490,8 +644,15 @@ void HttpServer::sweep_idle_connections() {
         bool stale = false;
         {
             std::lock_guard<std::mutex> cl(conn->mutex);
-            stale = !conn->closed &&
-                    now - conn->last_active >= std::chrono::seconds(read_timeout_);
+            if (conn->closed) {
+                continue;
+            }
+            if (conn->sending) {
+                // 阶段3：发送挂起超时（慢客户端久未可写）→ 按写超时兜底关闭
+                stale = now >= conn->send_deadline;
+            } else {
+                stale = now - conn->last_active >= std::chrono::seconds(read_timeout_);
+            }
         }
         if (stale) {
             close_conn(conn);
@@ -500,51 +661,105 @@ void HttpServer::sweep_idle_connections() {
 }
 
 // ============================================================
-// 循环 writev 发送直到全部发出（非阻塞 + 短轮询）。
-// 把响应头与响应体拆成多个 iovec 一次发出，省掉把 body 拼进整串的一次拷贝；
-// 处理部分写入（跨 iovec 推进偏移），修复原实现忽略 send 返回值导致大响应被截断的问题。
+// 阶段3：发送非阻塞化（EPOLLOUT 事件驱动）
+//
+// 目标：慢客户端 / 大响应的发送不再占用消费者线程（消除 head-of-line blocking）。
+// 机制：
+//   - try_send：循环 send 直到全部发出或 EAGAIN；写满时把剩余挂到 conn->out_buf、
+//     注册 EPOLLOUT 并置 sending=true，调用方立即返回释放线程。
+//   - flush_out：EPOLLOUT 就绪时续发 out_buf；发完注销 EPOLLOUT、置 sending=false
+//     回 READY，并提交 process_client 继续处理（flush 期间到达的新数据 / 剩余缓冲）。
+//   - 超时兜底：send_deadline 超时由 sweep_idle_connections 关闭连接。
+// 线程安全：所有状态在 conn->mutex 下访问（process_client / flush_out / close_conn 串行）。
 // ============================================================
-bool HttpServer::send_allv(int fd, const struct iovec* iov, int iovcnt,
-                           int timeout_ms) {
-    std::size_t total = 0;
-    for (int i = 0; i < iovcnt; ++i) {
-        total += iov[i].iov_len;
+bool HttpServer::try_send(std::shared_ptr<ClientConn> conn, std::string&& data,
+                          bool close_after) {
+    // 前置：conn->mutex 已由调用方持有
+    if (conn->closed || conn->fd < 0) {
+        return false;
     }
-    const auto deadline =
-        std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-    std::size_t sent = 0;
-    while (sent < total) {
-        // 从 (iov, sent) 构造剩余未发送部分的 iovec 数组（跳过已发送的段）
-        struct iovec rem[16];
-        int rem_cnt = 0;
-        std::size_t offset = sent;
-        for (int i = 0; i < iovcnt && rem_cnt < 16; ++i) {
-            if (offset >= iov[i].iov_len) {
-                offset -= iov[i].iov_len;
-                continue;
-            }
-            rem[rem_cnt].iov_base =
-                static_cast<unsigned char*>(iov[i].iov_base) + offset;
-            rem[rem_cnt].iov_len = iov[i].iov_len - offset;
-            offset = 0;
-            ++rem_cnt;
-        }
-        ssize_t n = ::writev(fd, rem, rem_cnt);
+    if (data.empty()) {
+        return true;
+    }
+    std::size_t off = 0;
+    while (off < data.size()) {
+        ssize_t n = ::send(conn->fd, data.data() + off, data.size() - off,
+                           MSG_NOSIGNAL);
         if (n > 0) {
-            sent += static_cast<std::size_t>(n);
+            off += static_cast<std::size_t>(n);
             continue;
         }
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            if (std::chrono::steady_clock::now() >= deadline) {
-                return false;  // 发送超时
-            }
-            pollfd pfd{fd, POLLOUT, 0};
-            ::poll(&pfd, 1, 50);  // 短等待可写，避免忙等
-            continue;
+            // 写满：剩余挂到连接，注册 EPOLLOUT，等可写边沿续发
+            conn->out_buf = data.substr(off);
+            conn->sending = true;
+            conn->close_after_send = close_after;
+            conn->send_deadline =
+                std::chrono::steady_clock::now() +
+                std::chrono::seconds(write_timeout_);
+            mod_epoll_out(conn->fd, true);
+            return false;
         }
         return false;  // EPIPE / ECONNRESET / 对端关闭
     }
     return true;
+}
+
+void HttpServer::flush_out(std::shared_ptr<ClientConn> conn) {
+    std::unique_lock<std::mutex> lock(conn->mutex);
+    if (conn->closed || conn->fd < 0 || !conn->sending) {
+        return;
+    }
+    // 发送超时兜底：超过 write_timeout 仍未发完 → 关闭
+    if (std::chrono::steady_clock::now() >= conn->send_deadline) {
+        lock.unlock();
+        close_conn(conn);
+        return;
+    }
+    bool close_after = conn->close_after_send;
+    std::string data = std::move(conn->out_buf);
+    if (!try_send(conn, std::move(data), close_after)) {
+        if (conn->sending) {
+            return;  // 仍写满：等下次 EPOLLOUT
+        }
+        lock.unlock();
+        close_conn(conn);
+        return;
+    }
+    // 全部发出：回 READY（注销 EPOLLOUT）
+    conn->sending = false;
+    conn->out_buf.clear();
+    mod_epoll_out(conn->fd, false);
+    conn->last_active = std::chrono::steady_clock::now();
+    if (close_after) {
+        lock.unlock();
+        close_conn(conn);
+        return;
+    }
+    // 回 READY：提交 process_client 处理 flush 期间到达的新数据 / 剩余缓冲
+    //（ET 模式下这部分数据没有新边沿，必须主动调度，否则会卡住）
+    lock.unlock();
+    submit_process(conn);
+}
+
+void HttpServer::mod_epoll_out(int fd, bool enable) {
+    struct epoll_event ev {};
+    std::uint32_t events = EPOLLIN | EPOLLET | EPOLLRDHUP;
+    if (enable) {
+        events |= EPOLLOUT;
+    }
+    ev.events = events;
+    ev.data.fd = fd;
+    // 连接可能已关闭（fd 失效）：MOD 失败（EBADF）可忽略
+    epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, fd, &ev);
+}
+
+void HttpServer::submit_process(std::shared_ptr<ClientConn> conn) {
+    if (task_queue_) {
+        task_queue_->enqueue([this, conn] { process_client(conn); });
+    } else {
+        process_client(conn);
+    }
 }
 
 }  // namespace presentation::http

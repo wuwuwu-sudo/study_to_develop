@@ -2,10 +2,17 @@
 # 修改后重启 ./webserver 生效
 
 # ===== 服务器 =====
-# 事件循环线程池大小 = CPU 逻辑核数(本机 8)(0 = 不使用线程池，事件循环线程内同步处理)
+# 任务队列开关(1 = 事件循环提交到单消费线程任务队列；0 = 事件循环内同步处理)
+# 8 进程 × 1 核部署：每进程一个任务队列(1 个消费线程)，并行度来自进程数
 # 监听地址：默认 0.0.0.0(全接口)；接入 Nginx 时应设为 127.0.0.1(见 config/instance_*.json)
 server.bind_address=0.0.0.0
-server.thread_pool_size=8
+server.task_queue=1
+server.task_queue_consumers=2
+# 阶段5 读路径：read_path_async=1 强制全异步；0 + read_path_auto=1（默认）自适应——
+#   常态同步快路径，检测到慢路径（读耗时>slow_threshold_ms 样本达阈值）自动切异步，缓解后切回
+server.read_path_async=0
+server.read_path_auto=1
+server.read_path_auto.slow_threshold_ms=5
 server.max_connections=1024
 server.read_timeout=30
 server.write_timeout=30
@@ -16,10 +23,11 @@ server.rate_limit.window_seconds=60
 server.rate_limit.block_seconds=300
 
 # ===== 数据库 =====
-# 连接池大小应 >= 线程池大小，避免工作线程等待数据库连接
-# (main.cpp 通过 config.get_db_pool_size() 读取此值)
+# 单消费线程任务队列下每进程最多 1 个连接同时借出（仓储方法逐条借还、不嵌套），
+# 连接池大小 2 即有富余（1 在用 + 1 备用）；(main.cpp 通过 config.get_db_pool_size() 读取)
 db.path=food_delivery.db
-db.pool_size=16
+db.pool_size=4
+db.worker_threads=2
 
 # ===== 多级缓存（L1 本地内存 → L2 Redis → L3 数据源）=====
 # 菜品查询走三级缓存：先查本地内存，再查 Redis，最后才查数据库
@@ -31,6 +39,7 @@ cache.redis.host=127.0.0.1
 cache.redis.port=6379
 cache.redis.ttl=300
 cache.redis.timeout_ms=300
+cache.redis.worker_threads=1
 
 # ===== 日志（级别下调 + INFO 抽样；压测/生产可调低，避免日志写满磁盘）=====
 # server.log_level=debug/info/warn/error（设 warn 只留错误，每请求 INFO 日志归零）

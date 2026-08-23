@@ -10,6 +10,13 @@ public:
     explicit AppException(const std::string& message);
 };
 
+// 乐观锁冲突：条件更新影响 0 行（期望旧值已被其他写并发修改）。
+// handler 应映射为 HTTP 409。
+class OptimisticLockException : public AppException {
+public:
+    explicit OptimisticLockException(const std::string& message);
+};
+
 class InfrastructureException : public std::runtime_error {
 public:
     explicit InfrastructureException(const std::string& message, int code = 0);

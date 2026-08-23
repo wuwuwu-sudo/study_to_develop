@@ -7,11 +7,14 @@
 
 namespace infrastructure::database {
 
-DbConnection::DbConnection(sqlite3* handle, ConnectionPool* pool)
-    : handle_(handle), pool_(pool) {}
+DbConnection::DbConnection(sqlite3* handle, ConnectionPool* pool,
+                           std::unique_lock<std::mutex> write_lock)
+    : handle_(handle), pool_(pool), write_lock_(std::move(write_lock)) {}
 
 DbConnection::DbConnection(DbConnection&& other) noexcept
-    : handle_(other.handle_), pool_(other.pool_) {
+    : handle_(other.handle_),
+      pool_(other.pool_),
+      write_lock_(std::move(other.write_lock_)) {
     other.handle_ = nullptr;
     other.pool_ = nullptr;
 }
@@ -21,6 +24,7 @@ DbConnection& DbConnection::operator=(DbConnection&& other) noexcept {
         release();
         handle_ = other.handle_;
         pool_ = other.pool_;
+        write_lock_ = std::move(other.write_lock_);
         other.handle_ = nullptr;
         other.pool_ = nullptr;
     }

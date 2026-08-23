@@ -4,6 +4,8 @@
 // ============================================================
 
 #include <charconv>
+#include <cstddef>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <signal.h>
@@ -37,7 +39,8 @@
 // 基础设施层
 // ============================================================
 #include "infrastructure/database/db_manager.h"
-#include "infrastructure/database/connection_pool.h"   
+#include "infrastructure/database/connection_pool.h"
+#include "infrastructure/database/db_worker_pool.h"
 #include "infrastructure/database/migrations/init_db.h"
 #include "infrastructure/repositories/sqlite_user_repository.h"
 #include "infrastructure/repositories/sqlite_merchant_repository.h"
@@ -47,6 +50,7 @@
 #include "infrastructure/cache/local_cache.h"
 #include "infrastructure/cache/redis_client.h"
 #include "infrastructure/cache/multi_level_cache.h"
+#include "infrastructure/cache/redis_worker_pool.h"
 #include "infrastructure/common/logger.h"
 #include "infrastructure/common/config.h"
 #include "infrastructure/common/exception.h"
@@ -56,6 +60,7 @@
 // ============================================================
 #include "shared/constants.h"
 #include "shared/request_guard.h"
+#include "shared/slow_path_switch.h"
 #include "shared/utils.h"
 
 using namespace infrastructure::common;
@@ -265,7 +270,8 @@ int main(int argc, char* argv[]) {
         // ============================================================
         auto& db_manager = DbManager::instance();
         std::string db_path = config.get_db_path();
-        // 连接池大小由配置 db.pool_size 控制（默认 4，配置文件设为 16）
+        // 连接池大小由配置 db.pool_size 控制（默认 4；单消费线程任务队列下每进程
+        // 最多 1 个连接同时借出，实例配置设为 2 即有富余）
         int pool_size = config.get_db_pool_size();
 
         if (!db_manager.initialize(db_path, pool_size)) {
@@ -319,12 +325,13 @@ int main(int argc, char* argv[]) {
             local_max_entries, local_ttl);
 
         std::shared_ptr<infrastructure::cache::RedisClient> redis_client;
+        int redis_timeout_ms = config.get_int("cache.redis.timeout_ms", 300);
         if (config.get_int("cache.redis.enabled", 1) != 0) {
             std::string redis_host = config.get("cache.redis.host", "127.0.0.1");
             int redis_port = config.get_int("cache.redis.port", 6379);
+            // 阶段4：connect + read 超时统一接 cache.redis.timeout_ms（原来 read 用默认 500ms 未接配置）
             redis_client = std::make_shared<infrastructure::cache::RedisClient>(
-                redis_host, redis_port,
-                config.get_int("cache.redis.timeout_ms", 300));
+                redis_host, redis_port, redis_timeout_ms, redis_timeout_ms);
             if (redis_client->ping()) {
                 LOG_INFO("Redis cache connected: " + redis_host + ":" +
                          std::to_string(redis_port));
@@ -336,8 +343,30 @@ int main(int argc, char* argv[]) {
             LOG_INFO("Redis cache disabled by config");
         }
 
+        // 阶段4：Redis 专用工作线程——L2 写操作（set/del/clear_prefix）投到专用线程，
+        // 业务线程不阻塞在 Redis socket 上（读路径 L1 命中零 Redis，仅 L1 miss 同步查 L2）。
+        // worker_threads<=0 时禁用异步（L2 写回退同步，向后兼容，可作 A/B 对照）。
+        int redis_workers = static_cast<int>(config.get_int(
+            "cache.redis.worker_threads", constants::DEFAULT_REDIS_WORKER_THREADS));
+        std::shared_ptr<infrastructure::cache::RedisWorkerPool> redis_worker_pool;
+        infrastructure::cache::MultiLevelCache::RedisAsyncSubmit redis_async_submit;
+        if (redis_workers > 0) {
+            redis_worker_pool = std::make_shared<infrastructure::cache::RedisWorkerPool>(
+                static_cast<std::size_t>(redis_workers));
+            redis_async_submit =
+                [redis_worker_pool](std::function<void()> fn) {
+                    redis_worker_pool->submit(std::move(fn));
+                };
+        }
         auto multi_level_cache = std::make_shared<infrastructure::cache::MultiLevelCache>(
-            local_cache, redis_client);
+            local_cache, redis_client, redis_async_submit);
+        if (redis_worker_pool) {
+            LOG_INFO("Redis worker pool: " +
+                     std::to_string(redis_worker_pool->worker_count()) +
+                     " thread(s) (L2 writes async)");
+        } else {
+            LOG_INFO("Redis worker pool disabled (L2 writes sync, A/B control)");
+        }
 
         int redis_ttl = config.get_int("cache.redis.ttl",
                                        constants::DEFAULT_CACHE_REDIS_TTL_SECONDS);
@@ -610,11 +639,75 @@ int main(int argc, char* argv[]) {
         g_server->set_read_timeout(config.get_int("server.read_timeout", 30));
         g_server->set_write_timeout(config.get_int("server.write_timeout", 30));
 
-        // 事件循环线程池大小（0 = 不使用线程池，同步处理）
-        int worker_count = config.get_int("server.thread_pool_size",
-                                          constants::DEFAULT_THREAD_POOL_SIZE);
-        g_server->set_worker_count(worker_count);
-        LOG_INFO("Event loop thread pool size: " + std::to_string(worker_count));
+        // 任务队列（1 = 事件循环提交到任务队列；0 = 事件循环内同步处理）
+        // 8 进程部署：默认每进程 1 个消费线程，并行度来自进程数；
+        // 可配 server.task_queue_consumers >1 缓解单任务阻塞（需 A/B 权衡过订阅）
+        bool task_queue_enabled =
+            config.get_int("server.task_queue", constants::DEFAULT_TASK_QUEUE_ENABLED) != 0;
+        g_server->set_task_queue_enabled(task_queue_enabled);
+        int task_queue_consumers =
+            config.get_int("server.task_queue_consumers",
+                           constants::DEFAULT_TASK_QUEUE_CONSUMERS);
+        g_server->set_task_queue_consumers(task_queue_consumers);
+        LOG_INFO("Task queue enabled: " + std::to_string(task_queue_enabled) +
+                 ", consumers: " + std::to_string(task_queue_consumers));
+
+        // ---------- 阶段2：DB 工作线程池（写请求异步化） ----------
+        // 业务线程把写处理链（中间件+路由，含 DB 写 + 缓存失效）提交到独立
+        // worker 线程，不阻塞事件循环；worker 完成后把响应投回任务队列续跑。
+        auto db_worker_pool = std::make_shared<
+            infrastructure::database::DbWorkerPool>(
+            static_cast<std::size_t>(config.get_int(
+                "db.worker_threads", constants::DEFAULT_DB_WORKER_THREADS)));
+        g_server->set_db_submitter(
+            [db_worker_pool](std::function<std::string()> task,
+                             std::function<void(std::string)> on_done) {
+                db_worker_pool->submit(std::move(task), std::move(on_done));
+            });
+        LOG_INFO("DB worker pool: " +
+                 std::to_string(db_worker_pool->worker_count()) +
+                 " threads (write async enabled)");
+
+        // ---------- 阶段5：读路径异步化（全链路事件驱动）+ 自适应慢路径开关 ----------
+        // 三级模式：
+        //   read_path_async=1        强制全异步（GET 也投 DB worker 池整链执行）；
+        //   read_path_auto=1（默认） 自适应：常态同步快路径，检测到慢路径（读请求
+        //     耗时 > slow_threshold_ms 的样本比例达窗口阈值）自动切异步，缓解后切回；
+        //   两者均关                   强制同步（L1 吸收）。
+        bool read_path_async =
+            config.get_int("server.read_path_async",
+                           constants::DEFAULT_READ_PATH_ASYNC) != 0;
+        g_server->set_read_path_async(read_path_async);
+        std::shared_ptr<shared::SlowPathSwitch> slow_switch;
+        std::string read_mode;
+        if (read_path_async) {
+            read_mode = "forced async (GET offloaded to DB worker pool)";
+        } else if (config.get_int("server.read_path_auto",
+                                  constants::DEFAULT_READ_PATH_AUTO) != 0) {
+            shared::SlowPathSwitch::Config sc;
+            sc.slow_threshold_us =
+                config.get_int("server.read_path_auto.slow_threshold_ms",
+                               constants::DEFAULT_READ_PATH_SLOW_THRESHOLD_MS) *
+                1000;
+            slow_switch = std::make_shared<shared::SlowPathSwitch>(sc);
+            // 状态切换可观测：慢路径触发异步（WARN 醒目）与恢复回同步（INFO）
+            slow_switch->set_on_state_change([](bool async_on) {
+                if (async_on) {
+                    LOG_WARN("Read path auto-switch: async ON (slow path detected, "
+                             "GET offloaded to DB worker pool)");
+                } else {
+                    LOG_INFO("Read path auto-switch: async OFF (recovered, back "
+                             "to sync fast path)");
+                }
+            });
+            read_mode = "adaptive (sync fast path, auto-switch async on slow, "
+                        "threshold=" +
+                        std::to_string(sc.slow_threshold_us / 1000) + "ms)";
+        } else {
+            read_mode = "forced sync (L1 absorb)";
+        }
+        g_server->set_slow_path_switch(slow_switch);
+        LOG_INFO("Read path: " + read_mode);
 
         // ---------- 添加中间件 ----------
         // 1. 日志中间件 - 记录所有请求
@@ -678,6 +771,10 @@ int main(int argc, char* argv[]) {
         // 15. 清理资源
         // ============================================================
         LOG_INFO("Server stopped");
+        db_worker_pool->shutdown();   // 排空 DB 写任务（幂等）
+        if (redis_worker_pool) {
+            redis_worker_pool->shutdown();  // 阶段4：排空 Redis 写任务（幂等）
+        }
         g_server.reset();
         db_manager.shutdown();
         session_manager.stop_cleanup_loop();

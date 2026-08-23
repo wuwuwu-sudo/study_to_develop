@@ -81,6 +81,8 @@ void write_service_error(const AppException& e,
     int status = 500;
     if (msg.find("不存在") != std::string::npos) {
         status = 404;
+    } else if (msg.find("已被其他操作修改") != std::string::npos) {
+        status = 409;  // 乐观锁冲突
     } else if (msg.find("不能为空") != std::string::npos ||
                msg.find("不能为负数") != std::string::npos ||
                msg.find("无效") != std::string::npos) {

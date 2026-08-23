@@ -1,10 +1,8 @@
 #include "middleware/rate_limit_middleware.h"
 
-#include <array>
 #include <chrono>
 #include <cctype>
 #include <cstddef>
-#include <functional>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -49,22 +47,14 @@ public:
         std::chrono::steady_clock::time_point blocked_until{};
     };
 
-    // 按客户端 key 哈希分片：每片独立锁 + 独立 entries，避免单一全局锁把
-    // 不同客户端的限流判定串行化；同 key（同客户端）恒进同片，限流语义不变。
-    static constexpr std::size_t kShards = 16;
-    struct Shard {
-        std::mutex mutex;
-        std::unordered_map<std::string, Entry> entries;
-    };
-    std::array<Shard, kShards> shards;
+    // 单锁 + 单表：8 进程 × 单消费线程模型下，每进程仅消费线程执行中间件，
+    // 16 片分片锁已无争用，简化为单一互斥锁（限流判定微秒级，锁内不调用 next()）。
+    mutable std::mutex mutex;
+    std::unordered_map<std::string, Entry> entries;
 
     int max_requests = kDefaultMaxRequests;
     int window_seconds = kDefaultWindowSeconds;
     int block_seconds = kDefaultBlockSeconds;
-
-    Shard& shard_for(const std::string& key) {
-        return shards[std::hash<std::string>{}(key) % kShards];
-    }
 
     // 多级回退提取客户端标识：优先真实 IP，其次转发链，最后兜底 unknown
     // 防御：避免缺失 header 时所有客户端共享同一 key 导致全局限流
@@ -108,9 +98,8 @@ void RateLimitMiddleware::handle(const presentation::http::HttpRequest& request,
     enum class Outcome { kAllowed, kBlocked, kExceeded };
     Outcome outcome = Outcome::kAllowed;
     {
-        auto& shard = impl_->shard_for(key);
-        std::lock_guard<std::mutex> lock(shard.mutex);
-        auto& entry = shard.entries[key];
+        std::lock_guard<std::mutex> lock(impl_->mutex);
+        auto& entry = impl_->entries[key];
 
         // 封禁期：直接拒绝
         if (entry.blocked_until > now) {

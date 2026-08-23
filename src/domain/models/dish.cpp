@@ -96,3 +96,11 @@ bool Dish::is_available() const {
 bool Dish::is_deleted() const {
     return deleted_;
 }
+
+int Dish::get_version() const {
+    return version_;
+}
+
+void Dish::set_version(int version) {
+    version_ = version;
+}

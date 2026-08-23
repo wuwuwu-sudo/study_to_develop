@@ -1,10 +1,10 @@
 外卖平台的雏形
 
 经过重构，商家和顾客接发的HTTP响应都是JSON格式，且都是UTF-8的编码，更规范更安全。
+实现全链路事件驱动和异步化
 
-
-菜品编辑功能有严重问题（顺便把菜品添加功能和数据库中的价格单位改了）
 ctrl + shift + I开console（前端检查）
+
 
 
 已经安装好Nginx（需要创建 Nginx 静态文件目录，日志目录和配置文件以及对webserver相对应的修改）
@@ -15,30 +15,30 @@ Web框架	自建 (epoll + 线程池)	轻量级，完全控制
 异步框架	libuv / boost.asio	跨平台异步I/O
 协程	libco / folly	轻量级并发
 序列化	RapidJSON / simdjson	高性能JSON解析
-2. 网络层
+1. 网络层
 组件	推荐技术	说明
 反向代理	Nginx	静态文件、负载均衡
 HTTP/2	nghttp2	多路复用
 WebSocket	libwebsockets	实时通信
 零拷贝	sendfile / splice	减少内存拷贝
-3. 缓存层
+1. 缓存层
 组件	推荐技术	说明
 内存缓存	LRU Cache (自建)	L1 缓存，微秒级
 分布式缓存	Redis 7.x	L2 缓存，毫秒级
 本地缓存	Caffeine (Java风格)	自实现
-4. 数据库层
+1. 数据库层
 组件	推荐技术	说明
 OLTP	PostgreSQL 16	高并发，功能丰富
 嵌入式	SQLite 3.45	单机，轻量级
 连接池	libpqxx / sqlite3_pool	减少连接开销
 ORM	sqlpp11 / ODB	类型安全SQL
-5. 监控与观测
+1. 监控与观测
 组件	推荐技术	说明
 日志	spdlog	高性能异步日志
 指标	Prometheus + cpp_client	性能监控
 追踪	Jaeger	分布式追踪
 火焰图	perf + FlameGraph	CPU分析
-6. 开发工具
+1. 开发工具
 组件	推荐技术	说明
 构建	CMake + Ninja	快速编译
 测试	Google Test	单元测试

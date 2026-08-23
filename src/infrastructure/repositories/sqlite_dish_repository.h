@@ -16,6 +16,7 @@ public:
     std::vector<Dish> find_by_merchant(int merchant_id) override;
     int save(const Dish& dish) override;
     bool update(const Dish& dish) override;
+    int update_optimistic(const Dish& dish, int expected_version) override;
     bool set_available(int dish_id, bool available) override;
     bool delete_dish(int dish_id) override;
     std::vector<Dish> find_paged(int merchant_id, int page, int page_size) override;

@@ -114,7 +114,7 @@ std::optional<Order> SqliteOrderRepository::find_by_id(int order_id) {
 }
 
 int SqliteOrderRepository::save(const Order& order) {
-    auto conn = db_.get_connection();
+    auto conn = db_.get_write_connection();  // 阶段1 单写串行化门
     if (!conn) {
         Logger::instance().error("Failed to get database connection");
         return -1;
@@ -196,7 +196,7 @@ int SqliteOrderRepository::save(const Order& order) {
 }
 
 bool SqliteOrderRepository::update(const Order& order) {
-    auto conn = db_.get_connection();
+    auto conn = db_.get_write_connection();  // 阶段1 单写串行化门
     if (!conn) {
         Logger::instance().error("Failed to get database connection");
         return false;
@@ -227,6 +227,44 @@ bool SqliteOrderRepository::update(const Order& order) {
         return false;
     }
     return sqlite3_changes(handle) > 0;
+}
+
+int SqliteOrderRepository::update_optimistic(const Order& order, OrderStatus expected_status) {
+    auto conn = db_.get_write_connection();  // 阶段1 单写串行化门
+    if (!conn) {
+        Logger::instance().error("Failed to get database connection");
+        return -1;
+    }
+
+    sqlite3* handle = conn->handle();
+    // 乐观锁条件更新：仅当当前 status == 期望旧状态才更新；影响 0 行 = 并发冲突
+    const char* sql =
+        "UPDATE orders SET status = ?, total = ?, address = ?, remark = ? "
+        "WHERE id = ? AND status = ?;";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        Logger::instance().error("Failed to prepare statement: " + std::string(sqlite3_errmsg(handle)));
+        return -1;
+    }
+
+    sqlite3_bind_text(stmt, 1, status_to_string(order.get_status()), -1, SQLITE_STATIC);
+    sqlite3_bind_double(stmt, 2, order.get_total().get_yuan());
+    sqlite3_bind_text(stmt, 3, order.get_address().c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 4, "", -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 5, order.get_id());
+    sqlite3_bind_text(stmt, 6, status_to_string(expected_status), -1, SQLITE_STATIC);
+
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    if (rc != SQLITE_DONE) {
+        Logger::instance().error("Failed to update order (optimistic): " +
+                                 std::string(sqlite3_errmsg(handle)));
+        return -1;
+    }
+    return sqlite3_changes(handle) > 0 ? 1 : 0;
 }
 
 std::vector<Order> SqliteOrderRepository::find_by_user(int user_id) {

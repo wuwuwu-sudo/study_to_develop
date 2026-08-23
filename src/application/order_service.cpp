@@ -11,6 +11,7 @@ namespace application {
 
 using infrastructure::common::AppException;
 using infrastructure::common::Logger;
+using infrastructure::common::OptimisticLockException;
 
 namespace {
 
@@ -210,7 +211,9 @@ bool OrderService::update_order_status(int order_id, int merchant_id, OrderStatu
         return false;
     }
 
-    // 通过状态机校验并改变订单状态（非法转换抛出 std::invalid_argument）
+    // 乐观锁：状态机校验前记录期望旧状态；条件更新 WHERE status = expected
+    // 保证「读-改-写」不被并发写交错（单写串行门只串行化写，不覆盖读-改-写序列）。
+    OrderStatus expected_status = order->get_status();
     try {
         order->transition_to(new_status);
     } catch (const std::invalid_argument& e) {
@@ -221,7 +224,14 @@ bool OrderService::update_order_status(int order_id, int merchant_id, OrderStatu
 
     bool ok = false;
     try {
-        ok = order_repo_->update(*order);
+        int rc = order_repo_->update_optimistic(*order, expected_status);
+        if (rc == 0) {
+            // 并发冲突：期望旧状态已被其他写修改（丢失更新保护）
+            throw OptimisticLockException("订单状态已被其他操作修改，请刷新后重试");
+        }
+        ok = (rc == 1);
+    } catch (const OptimisticLockException&) {
+        throw;  // 透传，由 handler 映射 409
     } catch (const std::exception& e) {
         Logger::instance().error("update_order_status update failed: " + std::string(e.what()));
         return false;
@@ -262,7 +272,8 @@ bool OrderService::complete_order(int order_id, int user_id) {
         return false;
     }
 
-    // 状态机校验：仅“配送中 → 已完成”为合法转换，其余（含终态/非法状态）由状态机拒绝
+    // 乐观锁：状态机校验前记录期望旧状态；条件更新 WHERE status = expected
+    OrderStatus expected_status = order->get_status();
     try {
         order->transition_to(OrderStatus::DELIVERED);
     } catch (const std::invalid_argument& e) {
@@ -273,7 +284,14 @@ bool OrderService::complete_order(int order_id, int user_id) {
 
     bool ok = false;
     try {
-        ok = order_repo_->update(*order);
+        int rc = order_repo_->update_optimistic(*order, expected_status);
+        if (rc == 0) {
+            // 并发冲突：期望旧状态已被其他写修改
+            throw OptimisticLockException("订单状态已被其他操作修改，请刷新后重试");
+        }
+        ok = (rc == 1);
+    } catch (const OptimisticLockException&) {
+        throw;  // 透传，由 handler 映射 409
     } catch (const std::exception& e) {
         Logger::instance().error("complete_order update failed: " + std::string(e.what()));
         return false;

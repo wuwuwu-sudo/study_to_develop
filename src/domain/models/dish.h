@@ -32,6 +32,9 @@ public:
     const std::string& get_description() const;
     bool is_available() const;
     bool is_deleted() const;
+    // 乐观锁版本号（持久化；由仓储从 DB 恢复，写时做 version 条件更新）
+    int get_version() const;
+    void set_version(int version);
 
 private:
     int id_ = 0;
@@ -42,5 +45,6 @@ private:
     std::string description_;
     bool available_ = true;
     bool deleted_ = false;
+    int version_ = 0;
     std::function<bool()> active_orders_check_;
 };

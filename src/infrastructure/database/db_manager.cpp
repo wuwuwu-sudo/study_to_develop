@@ -55,6 +55,21 @@ std::unique_ptr<DbConnection> DbManager::get_connection() {
     return std::make_unique<DbConnection>(handle, pool_.get());
 }
 
+std::unique_ptr<DbConnection> DbManager::get_write_connection() {
+    if (!pool_) {
+        return nullptr;
+    }
+
+    // 阶段1 单写串行化：先取进程内写锁（等待期间不占用连接，避免死锁），
+    // 再借连接；写锁随 DbConnection 生命周期释放（覆盖整个写事务）。
+    std::unique_lock<std::mutex> wlock = pool_->lock_for_write();
+    sqlite3* handle = pool_->getConnection();
+    if (handle == nullptr) {
+        return nullptr;  // wlock 随返回释放
+    }
+    return std::make_unique<DbConnection>(handle, pool_.get(), std::move(wlock));
+}
+
 int DbManager::pool_size() const {
     return pool_ ? pool_->poolSize() : 0;
 }

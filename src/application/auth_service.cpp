@@ -380,7 +380,8 @@ bool AuthService::set_merchant_status(const std::string& session_id, bool open) 
     }
     merchant->set_open(open);
     try {
-        bool ok = merchant_repo_->save(*merchant) > 0;
+        // 幂等条件更新营业状态（仅当状态变化才写），避免整行覆盖并发修改
+        bool ok = merchant_repo_->update_open_status(merchant->get_id(), open);
         if (ok) {
             invalidate_open_merchants_cache();
             Logger::instance().info("Merchant status updated: id=" +

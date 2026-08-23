@@ -11,6 +11,7 @@ namespace presentation::handlers {
 namespace {
 
 using infrastructure::common::AppException;
+using infrastructure::common::OptimisticLockException;
 using nlohmann::json;
 
 // 解析请求体为 JSON，失败时返回空对象
@@ -201,8 +202,14 @@ void OrderHandler::handle_update_order_status(const presentation::http::HttpRequ
         return;
     }
 
-    // 3. 调服务层（服务层校验商家归属与状态机合法性）
-    bool ok = order_service_.update_order_status(order_id, merchant->get_id(), *new_status);
+    // 3. 调服务层（服务层校验商家归属与状态机合法性；乐观锁冲突 → 409）
+    bool ok = false;
+    try {
+        ok = order_service_.update_order_status(order_id, merchant->get_id(), *new_status);
+    } catch (const OptimisticLockException& e) {
+        write_error(response, 409, e.what());
+        return;
+    }
     if (!ok) {
         write_error(response, 400, "更新订单状态失败（非法转换或无权操作）");
         return;
@@ -228,8 +235,14 @@ void OrderHandler::handle_confirm_delivery(const presentation::http::HttpRequest
         return;
     }
 
-    // 3. 调服务层（服务层校验顾客归属与状态机：仅配送中 → 已完成）
-    bool ok = order_service_.complete_order(order_id, user->id);
+    // 3. 调服务层（服务层校验顾客归属与状态机：仅配送中 → 已完成；乐观锁冲突 → 409）
+    bool ok = false;
+    try {
+        ok = order_service_.complete_order(order_id, user->id);
+    } catch (const OptimisticLockException& e) {
+        write_error(response, 409, e.what());
+        return;
+    }
     if (!ok) {
         write_error(response, 400, "确认收货失败（订单不存在、非本人订单或状态不允许）");
         return;

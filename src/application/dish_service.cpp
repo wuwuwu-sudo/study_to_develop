@@ -17,6 +17,7 @@ namespace application {
 
 using infrastructure::common::AppException;
 using infrastructure::common::Logger;
+using infrastructure::common::OptimisticLockException;
 
 namespace {
 
@@ -454,26 +455,31 @@ DishDto DishService::update_dish(const DishDto& dish) {
         throw AppException("菜品不存在");
     }
 
-    // 保留原有 merchant_id，避免越权修改归属商家
+    // 保留原有 merchant_id，避免越权修改归属商家；并保留乐观锁版本号
     Dish updated(dish.id, existing->get_merchant_id(),
                  dish.name, Money(dish.price), dish.category, dish.description);
     if (!dish.available) {
         updated.set_available(false);
     }
+    updated.set_version(existing->get_version());
 
     // 领域层兜底校验（名称非空、价格非负）
     validate_entity(updated);
 
-    bool ok = false;
+    // 乐观锁版本列条件更新：仅当当前 version == 读取时的版本才更新；0 行 = 并发冲突
     try {
-        ok = dish_repo_->update(updated);
+        int rc = dish_repo_->update_optimistic(updated, existing->get_version());
+        if (rc == 0) {
+            throw OptimisticLockException("菜品已被其他操作修改，请刷新后重试");
+        }
+        if (rc != 1) {
+            throw AppException("更新菜品失败");
+        }
+    } catch (const OptimisticLockException&) {
+        throw;  // 透传，由 handler 映射 409
     } catch (const std::exception& e) {
         Logger::instance().error("update_dish failed: " + std::string(e.what()));
         throw AppException("更新菜品失败，请稍后重试");
-    }
-    if (!ok) {
-        Logger::instance().warn("update_dish: update returned false, id=" + std::to_string(dish.id));
-        throw AppException("更新菜品失败");
     }
 
     // 写操作后失效该商家全部缓存（L1 + L2）
